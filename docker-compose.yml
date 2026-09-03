@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  isro-vlm-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: isro_vlm_server
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
