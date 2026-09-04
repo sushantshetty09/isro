@@ -10,13 +10,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   FileText,
-  Bug,
   Play,
-  Check
+  Activity
 } from 'lucide-react';
 import { RedactionStyle, PIIElement, InteractiveNode, FramePrivacyReport, CategoryBreakdown, SanitizedScreenshotResult } from './types';
-import { redactFrame } from './utils/redactor';
-import { getSanitizedScreenshot, sendSanitizedPayloadToServer, assertSanitizedScreenshot } from './utils/sanitizer';
+import { getSanitizedScreenshot, sendSanitizedPayloadToServer } from './utils/sanitizer';
 
 export function App() {
   // Navigation & View Mode
@@ -169,24 +167,6 @@ export function App() {
     captureAndScan();
   }, []);
 
-  // Send Sanitized Payload to Server (Agent Demo)
-  const handleSendToAgentServer = async () => {
-    if (!lastSanitizedResult) return;
-    setIsDispatching(true);
-    setAgentStatus('Transmitting Sanitized Frame to 127.0.0.1:8000...');
-
-    try {
-      // Send through hard assertion guard
-      const data = await sendSanitizedPayloadToServer(lastSanitizedResult, userGoal);
-      setAgentResponse(data);
-      setAgentStatus('Action Received from Sanitized Context');
-    } catch (err: any) {
-      setAgentStatus(`Server Notice: ${err.message}. Ensure python main.py is running.`);
-    } finally {
-      setIsDispatching(false);
-    }
-  };
-
   // Run End-to-End Agent Action on Active Page (Demo Step)
   const handleRunAgentStepOnPage = async () => {
     setIsDispatching(true);
@@ -230,22 +210,30 @@ export function App() {
         });
 
         if (execRes?.success) {
-          setExecutedActionStatus(`✅ Action executed: ${execRes.message}`);
+          setExecutedActionStatus(`Action executed: ${execRes.message}`);
         } else {
-          setExecutedActionStatus(`⚠️ Notice: ${execRes?.message || 'Action sent'}`);
+          setExecutedActionStatus(`Notice: ${execRes?.message || 'Action sent'}`);
         }
       } else {
-        setExecutedActionStatus('✅ Task Goal Complete (DONE received)');
+        setExecutedActionStatus('Task goal complete (DONE received)');
       }
 
-      setAgentStatus('4. Step Complete. 0 Raw Bytes Leaked.');
+      setAgentStatus('4. Step complete. Zero raw bytes leaked.');
     } catch (err: any) {
       console.error('[Agent Ingestion Demo] Error:', err);
-      setAgentStatus(`Agent Error: ${err.message}`);
+      setAgentStatus(`Agent error: ${err.message}`);
     } finally {
       setIsDispatching(false);
     }
   };
+
+  const totalSessionProtected =
+    sessionTotals.faces +
+    sessionTotals.passwords +
+    sessionTotals.cards +
+    sessionTotals.aadhaar +
+    sessionTotals.pan +
+    sessionTotals.contact;
 
   return (
     <div className="app-container">
@@ -258,13 +246,14 @@ export function App() {
           <div>
             <div className="brand-title-row">
               <span className="brand-title">ISRO Privacy-Preserving Shield</span>
-              <span className="chip-pill chip-emerald">100% On-Device</span>
+              <span className="chip-pill chip-emerald">100% on-device</span>
             </div>
             <div className="brand-meta">
               <span>SIH PS 26171</span>
               <span>•</span>
               <span className="proven-zero">
-                <Lock size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /> 0 Bytes Leaked (PASS)
+                <Lock size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
+                0 bytes leaked (Pass)
               </span>
             </div>
           </div>
@@ -274,14 +263,14 @@ export function App() {
           <div className="latency-box">
             <div className="latency-label">Latency</div>
             <div className="latency-val">
-              <Zap size={10} style={{ display: 'inline', marginRight: 2 }} />
+              <Zap size={10} style={{ display: 'inline', marginRight: 2, verticalAlign: 'middle' }} />
               {frameLatency ? `${frameLatency} ms` : 'Standby'}
             </div>
           </div>
 
           <button onClick={() => captureAndScan()} disabled={isScanning} className="btn-scan">
             <RefreshCw size={12} className={isScanning ? 'animate-spin' : ''} />
-            <span>{isScanning ? 'Scanning...' : 'Scan Frame'}</span>
+            <span>{isScanning ? 'Scanning...' : 'Scan frame'}</span>
           </button>
         </div>
       </header>
@@ -294,14 +283,14 @@ export function App() {
             className={`tab-btn ${activeTab === 'scanner' ? 'active' : ''}`}
           >
             <Eye size={12} />
-            <span>Privacy Filter & Inspector</span>
+            <span>Privacy filter & inspector</span>
           </button>
           <button
             onClick={() => setActiveTab('agent')}
             className={`tab-btn ${activeTab === 'agent' ? 'active' : ''}`}
           >
             <Cpu size={12} />
-            <span>Agent Ingestion Demo</span>
+            <span>Agent ingestion demo</span>
           </button>
         </div>
 
@@ -314,7 +303,7 @@ export function App() {
                 onClick={() => handleStyleChange(style)}
                 className={`style-pill ${redactionStyle === style ? 'active' : ''}`}
               >
-                {style === 'blur' ? '💧 Blur' : style === 'pixelate' ? '🔲 Pixelate' : '⬛ Blackout'}
+                {style === 'blur' ? 'Blur' : style === 'pixelate' ? 'Pixelate' : 'Blackout'}
               </button>
             ))}
           </div>
@@ -325,61 +314,29 @@ export function App() {
       <div className="main-body">
         {activeTab === 'scanner' ? (
           <>
-            {/* Metric Strip */}
-            <div className="metric-grid">
-              <div className="metric-card">
-                <span className="metric-label">PII Masked</span>
-                <span className="metric-val" style={{ color: 'var(--emerald)' }}>{detectedPii.length}</span>
-                <span className="metric-sub">{sessionTotals.faces + sessionTotals.passwords + sessionTotals.cards + sessionTotals.aadhaar + sessionTotals.pan + sessionTotals.contact} session</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">👤 Faces</span>
-                <span className="metric-val" style={{ color: '#818cf8' }}>{report?.breakdown.faces || 0}</span>
-                <span className="metric-sub">{sessionTotals.faces} session</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">🔑 Passwords</span>
-                <span className="metric-val" style={{ color: 'var(--rose)' }}>{report?.breakdown.passwords || 0}</span>
-                <span className="metric-sub">{sessionTotals.passwords} session</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">🇮🇳 Aadhaar</span>
-                <span className="metric-val" style={{ color: 'var(--amber)' }}>{report?.breakdown.aadhaar || 0}</span>
-                <span className="metric-sub">{sessionTotals.aadhaar} session</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">🇮🇳 PAN</span>
-                <span className="metric-val" style={{ color: 'var(--cyan)' }}>{report?.breakdown.pan || 0}</span>
-                <span className="metric-sub">{sessionTotals.pan} session</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">💳 Cards</span>
-                <span className="metric-val" style={{ color: 'var(--purple)' }}>{report?.breakdown.cards || 0}</span>
-                <span className="metric-sub">{sessionTotals.cards} session</span>
-              </div>
-            </div>
+
 
             {/* View Mode Bar */}
             <div className="view-bar">
               <div className="mode-toggle">
-                <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: 10 }}>View:</span>
+                <span className="mode-toggle-label">View:</span>
                 <div className="mode-btns">
                   <button
                     onClick={() => setViewMode('split')}
                     className={`mode-btn ${viewMode === 'split' ? 'active' : ''}`}
                   >
-                    Side-by-Side Split
+                    Side-by-side split
                   </button>
                   <button
                     onClick={() => setViewMode('slider')}
                     className={`mode-btn ${viewMode === 'slider' ? 'active' : ''}`}
                   >
-                    Reveal Slider
+                    Reveal slider
                   </button>
                 </div>
               </div>
 
-              <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <label className="checkbox-label">
                 <input
                   type="checkbox"
                   checked={showSoMTags}
@@ -388,7 +345,7 @@ export function App() {
                     captureAndScan();
                   }}
                 />
-                <span>Show [ID] Action Tags</span>
+                <span>Show [ID] action tags</span>
               </label>
             </div>
 
@@ -399,13 +356,15 @@ export function App() {
                   <div className="split-container">
                     <div className="split-col">
                       <div className="stage-badge badge-tainted">
-                        <AlertTriangle size={9} style={{ display: 'inline', marginRight: 2 }} /> Original Screen (Local Only)
+                        <AlertTriangle size={9} style={{ display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
+                        Original screen (local only)
                       </div>
                       <img src={rawScreenshot || sanitizedScreenshot} alt="Original Screen" className="stage-img" />
                     </div>
                     <div className="split-col">
                       <div className="stage-badge badge-sanitized">
-                        <ShieldCheck size={9} style={{ display: 'inline', marginRight: 2 }} /> Sanitized Output (Agent View)
+                        <ShieldCheck size={9} style={{ display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
+                        Sanitized output (agent view)
                       </div>
                       <img src={sanitizedScreenshot} alt="Sanitized View" className="stage-img" />
                     </div>
@@ -434,7 +393,9 @@ export function App() {
                         />
                       </div>
                       <div className="slider-handle-line" style={{ left: `${sliderPos}%` }}>
-                        <div className="slider-knob">↔</div>
+                        <div className="slider-knob">
+                          <Activity size={10} />
+                        </div>
                       </div>
                     </div>
                     <input
@@ -451,20 +412,20 @@ export function App() {
                 <div style={{ color: 'var(--text-dim)', fontSize: 11, textAlign: 'center', padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                   {isScanning ? (
                     <>
-                      <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--emerald)' }} />
+                      <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--accent)' }} />
                       <span>Scanning active webpage and scrubbing sensitive fields on-device...</span>
                     </>
                   ) : debugInfo.errorMsg ? (
                     <>
-                      <AlertTriangle size={20} style={{ color: 'var(--rose)' }} />
-                      <span style={{ color: 'var(--rose)', fontWeight: 600 }}>Capture notice: {debugInfo.errorMsg}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Make sure an active web page tab is selected.</span>
+                      <AlertTriangle size={20} style={{ color: 'var(--danger-text)' }} />
+                      <span style={{ color: 'var(--danger-text)', fontWeight: 600 }}>Capture notice: {debugInfo.errorMsg}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Make sure an active webpage tab is selected.</span>
                       <button onClick={() => captureAndScan()} className="btn-scan" style={{ marginTop: 6 }}>
-                        <RefreshCw size={11} /> Try Scan Again
+                        <RefreshCw size={11} /> Try scan again
                       </button>
                     </>
                   ) : (
-                    <span>Ready to scan. Click "Scan Frame" to capture and redact active page.</span>
+                    <span>Ready to scan. Click "Scan frame" to capture and redact active page.</span>
                   )}
                 </div>
               )}
@@ -474,55 +435,44 @@ export function App() {
             <div className="manifest-card">
               <div className="manifest-header">
                 <span className="manifest-title">
-                  <FileText size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-                  Detection Manifest ({detectedPii.length} sensitive items protected)
+                  <FileText size={12} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />
+                  Detection manifest ({detectedPii.length} sensitive items protected)
                 </span>
-                <span className="chip-pill chip-emerald">Zero Raw PII Transmitted</span>
+                <span className="chip-pill chip-emerald">Zero raw PII transmitted</span>
               </div>
 
-              <div className="manifest-chips">
+              <div className="manifest-list">
                 {detectedPii.length > 0 ? (
                   detectedPii.map((p, idx) => (
-                    <div key={p.id || idx} className="pii-chip">
-                      <span
-                        className="dot-indicator"
-                        style={{
-                          background:
-                            p.category === 'government_id'
-                              ? 'var(--amber)'
-                              : p.category === 'credentials'
-                              ? 'var(--rose)'
-                              : p.category === 'financial'
-                              ? 'var(--purple)'
-                              : 'var(--indigo)',
-                        }}
-                      />
-                      <span style={{ fontWeight: 600 }}>{p.label}</span>
-                      {p.triggerType === 'structural' && !p.content_present && (
-                        <span style={{ fontSize: 9, background: 'rgba(99, 102, 241, 0.25)', color: '#c7d2fe', padding: '1px 5px', borderRadius: 3, marginLeft: 2, fontWeight: 700 }}>
-                          Structural Field
-                        </span>
-                      )}
-                      <span style={{ color: 'var(--text-dim)' }}>({(p.confidence * 100).toFixed(0)}%)</span>
+                    <div key={p.id || idx} className="manifest-row">
+                      <div className="manifest-row-left">
+                        <span className="manifest-row-dot" />
+                        <span className="manifest-row-label">{p.label}</span>
+                        {p.triggerType === 'structural' && !p.content_present && (
+                          <span className="manifest-row-tag">
+                            Structural field
+                          </span>
+                        )}
+                      </div>
+                      <span className="manifest-row-confidence">{(p.confidence * 100).toFixed(0)}% confidence</span>
                     </div>
                   ))
                 ) : (
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  <div className="manifest-empty">
                     No sensitive PII detected on current page.
-                  </span>
+                  </div>
                 )}
               </div>
             </div>
 
             {/* Real-time Diagnostics Bar */}
             {showDebugBar && (
-              <div style={{ background: '#070a10', border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 8px', fontSize: 9.5, color: 'var(--text-dim)', display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace' }}>
+              <div className="debug-bar">
                 <span>
-                  <Bug size={9} style={{ display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
                   DOM: {debugInfo.domCount} | Vision: {debugInfo.visualCount} | Merged: {debugInfo.mergedCount}
                 </span>
                 <span>
-                  Seal: {lastSanitizedResult?.brandSeal.signature || 'VALID'} | Viewport: {viewportMeta.width}x{viewportMeta.height}
+                  Seal: {lastSanitizedResult?.brandSeal.signature ? 'VALID' : 'STANDBY'} | Viewport: {viewportMeta.width}x{viewportMeta.height}
                 </span>
               </div>
             )}
@@ -532,31 +482,31 @@ export function App() {
           <div className="agent-grid">
             <div className="agent-card">
               <div className="agent-title">
-                <span>Outgoing Sanitized Payload</span>
-                <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'monospace' }}>POST /process-screen</span>
+                <span>Outgoing sanitized payload</span>
+                <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'Courier New, monospace' }}>POST /process-screen</span>
               </div>
-              <div style={{ background: '#020617', padding: 6, borderRadius: 6, textAlign: 'center', height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="agent-preview-box">
                 {sanitizedScreenshot ? (
-                  <img src={sanitizedScreenshot} alt="Payload" style={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain', borderRadius: 4 }} />
+                  <img src={sanitizedScreenshot} alt="Payload" />
                 ) : (
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>No frame</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>No frame</span>
                 )}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', background: '#020617', padding: 6, borderRadius: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div>Redacted Regions: <strong style={{ color: 'var(--emerald)' }}>{detectedPii.length} masked</strong></div>
-                <div>DOM Action Nodes: <strong>{interactiveNodes.length} indexed</strong></div>
-                <div>Runtime Seal: <strong style={{ color: 'var(--cyan)', fontFamily: 'monospace' }}>{lastSanitizedResult?.brandSeal.signature || 'ISRO-VERIFIED'}</strong></div>
-                <div>Sensitive Exfiltration: <strong style={{ color: 'var(--emerald)' }}>0 bytes (PROVEN)</strong></div>
+              <div className="agent-info-block">
+                <div>Redacted regions: <strong className="val-success">{detectedPii.length} masked</strong></div>
+                <div>DOM action nodes: <strong>{interactiveNodes.length} indexed</strong></div>
+                <div>Runtime seal: <strong className="val-mono">{lastSanitizedResult?.brandSeal.signature || 'ISRO-VERIFIED'}</strong></div>
+                <div>Sensitive exfiltration: <strong className="val-success">0 bytes (Proven)</strong></div>
               </div>
             </div>
 
             <div className="agent-card">
               <div className="agent-title">
-                <span>Central Model Inference & Form Fill</span>
+                <span>Model inference & form fill</span>
               </div>
               <div>
-                <label style={{ fontSize: 9, textTransform: 'uppercase', color: 'var(--text-dim)', fontWeight: 700, display: 'block', marginBottom: 2 }}>
-                  Task Goal
+                <label className="input-goal-label">
+                  Task goal
                 </label>
                 <input
                   type="text"
@@ -566,39 +516,38 @@ export function App() {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                 <button
                   onClick={handleRunAgentStepOnPage}
                   disabled={isDispatching}
                   className="btn-dispatch"
-                  style={{ background: 'linear-gradient(135deg, #059669, #0d9488)', flex: 1 }}
                 >
-                  <Play size={11} style={{ display: 'inline', marginRight: 4 }} />
-                  {isDispatching ? 'Executing...' : '⚡ Run Agent Step on Page'}
+                  <Play size={11} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />
+                  {isDispatching ? 'Executing...' : 'Run agent step on page'}
                 </button>
               </div>
 
-              <div style={{ background: '#020617', padding: 6, borderRadius: 4, fontSize: 10 }}>
-                <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Status:</div>
-                <div style={{ color: '#a5b4fc', fontFamily: 'monospace', fontSize: 9.5 }}>{agentStatus}</div>
+              <div className="agent-status-block">
+                <div className="status-label">Status:</div>
+                <div className="status-value">{agentStatus}</div>
                 {executedActionStatus && (
-                  <div style={{ color: 'var(--emerald)', marginTop: 4, fontWeight: 600 }}>{executedActionStatus}</div>
+                  <div style={{ color: 'var(--success)', marginTop: 4, fontWeight: 600 }}>{executedActionStatus}</div>
                 )}
               </div>
 
               {agentResponse && (
-                <div style={{ background: '#020617', padding: 6, borderRadius: 4, fontSize: 10, border: '1px solid var(--border-highlight)' }}>
-                  <div style={{ color: 'var(--emerald)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <CheckCircle2 size={12} /> Server Action:
+                <div className="agent-response-block">
+                  <div className="agent-response-title">
+                    <CheckCircle2 size={12} /> Server action:
                   </div>
-                  <pre style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 9, marginTop: 2, whiteSpace: 'pre-wrap' }}>
+                  <pre>
                     {JSON.stringify(agentResponse.action || agentResponse, null, 2)}
                   </pre>
                 </div>
               )}
 
               <a href="http://127.0.0.1:8000/inspector" target="_blank" rel="noreferrer" className="inspector-link">
-                <ExternalLink size={10} /> Open Judge Inspector Dashboard
+                <ExternalLink size={10} /> Open judge inspector dashboard
               </a>
             </div>
           </div>
@@ -607,7 +556,7 @@ export function App() {
 
       {/* 4. Footer */}
       <footer className="app-footer">
-        <div>🔒 Zero-Egress Sandbox • 100% On-Device Filter</div>
+        <div>Zero-egress sandbox • 100% on-device filter</div>
         <div>Frames: {totalFramesScanned} | Leaks: 0</div>
       </footer>
     </div>

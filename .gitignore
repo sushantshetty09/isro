@@ -13,6 +13,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+vite.config.ts.timestamp*
+client/vite.config.ts.timestamp*
 
 # Python & Backend
 __pycache__/
@@ -25,6 +27,8 @@ env/
 venv/
 .venv/
 ENV/
+server/venv/
+server/.venv/
 build/
 develop-eggs/
 dist/
@@ -81,4 +85,5 @@ scratch/
 .system_generated/
 isro-privacy-perception-agent@*
 node
+
 
