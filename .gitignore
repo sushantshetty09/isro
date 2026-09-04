@@ -3,12 +3,16 @@ node_modules/
 client/node_modules/
 dist/
 client/dist/
+dist-ssr/
+client/dist-ssr/
 .vite/
 client/.vite/
+*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 
 # Python & Backend
 __pycache__/
@@ -36,6 +40,16 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases & Cache
+*.sqlite
+*.sqlite3
+*.db
+.cache/
+huggingface/
 
 # Model Weights & Large Binary Caches
 *.pt
@@ -44,17 +58,15 @@ wheels/
 *.onnx
 models/
 weights/
-.cache/
-huggingface/
 
-# Environment variables & secrets
+# Environment Variables & Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
 
-# IDE & OS files
+# IDE & OS Files
 .vscode/
 .idea/
 *.swp
@@ -67,3 +79,6 @@ desktop.ini
 *.log
 scratch/
 .system_generated/
+isro-privacy-perception-agent@*
+node
+

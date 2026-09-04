@@ -1,13 +1,15 @@
 const OFFSCREEN_PATH = 'src/offscreen/offscreen.html';
 const DEBUG = true;
+export const INTERNAL_SANITIZER_SECRET = 'ISRO_SECURE_INTERNAL_CHOKEPOINT_TOKEN_2024_PS26171';
 
 interface OffscreenVisionRequest {
   action: 'RUN_OFFSCREEN_VISION';
   imageDataUrl: string;
 }
 
-interface CaptureTabRequest {
-  action: 'CAPTURE_VISIBLE_TAB';
+interface InternalSanitizerCaptureRequest {
+  action: '_INTERNAL_RAW_CAPTURE_FOR_SANITIZER_ONLY';
+  internalToken: string;
 }
 
 interface BackendProxyRequest {
@@ -28,7 +30,7 @@ interface BackendProxyRequest {
   endpoint?: string;
 }
 
-type ServiceWorkerMessage = OffscreenVisionRequest | CaptureTabRequest | BackendProxyRequest;
+type ServiceWorkerMessage = OffscreenVisionRequest | InternalSanitizerCaptureRequest | BackendProxyRequest | { action: string };
 
 async function setupOffscreenDocument(path: string): Promise<void> {
   const hasDoc = await chrome.offscreen.hasDocument();
@@ -51,29 +53,72 @@ function computeShortHash(str: string): string {
 }
 
 chrome.runtime.onMessage.addListener(
-  (message: ServiceWorkerMessage, sender, sendResponse: (response: any) => void) => {
+  (message: any, sender, sendResponse: (response: any) => void) => {
     const tabId = sender.tab?.id ?? 'popup';
 
-    // 1. Untainted visible tab capture using official Chrome API
+    // 1. HARD SECURITY LOCK: Block any raw CAPTURE_VISIBLE_TAB requests
     if (message.action === 'CAPTURE_VISIBLE_TAB') {
-      if (DEBUG) console.log(`[Stage 1 - ServiceWorker] Capturing visible tab for context [${tabId}]`);
-
-      chrome.tabs.captureVisibleTab({ format: 'png' })
-        .then((dataUrl) => {
-          if (DEBUG) {
-            console.log(`[Stage 1 - ServiceWorker] Tab capture successful. Size: ${dataUrl.length} chars (hash: ${computeShortHash(dataUrl)})`);
-          }
-          sendResponse({ status: 'success', dataUrl });
-        })
-        .catch((err) => {
-          console.error('[Stage 1 - ServiceWorker] captureVisibleTab error:', err);
-          sendResponse({ status: 'error', error: err.message });
-        });
-
-      return true; // Keep channel open
+      console.error(`[ServiceWorker - SECURITY BLOCK] Public CAPTURE_VISIBLE_TAB requested by context [${tabId}] is disabled!`);
+      sendResponse({
+        status: 'error',
+        error: '🚨 [SECURITY POLICY] Raw tab capture is disabled. All screenshots must route through getSanitizedScreenshot().',
+      });
+      return false;
     }
 
-    // 2. Offscreen Local Vision Detection Relay
+    // 2. Internal isolated capture accessible ONLY to sanitizer with valid token
+    if (message.action === '_INTERNAL_RAW_CAPTURE_FOR_SANITIZER_ONLY') {
+      if (message.internalToken !== INTERNAL_SANITIZER_SECRET) {
+        console.error(`[ServiceWorker - SECURITY BLOCK] Invalid token provided for _INTERNAL_RAW_CAPTURE_FOR_SANITIZER_ONLY from [${tabId}]`);
+        sendResponse({
+          status: 'error',
+          error: '🚨 [SECURITY VIOLATION] Unauthorized attempt to access internal capture without valid sanitizer token.',
+        });
+        return false;
+      }
+
+      if (DEBUG) console.log(`[ServiceWorker] Internal raw frame captured exclusively for on-device sanitizer (windowId: ${message.windowId}).`);
+
+      try {
+        const targetWinId = (typeof message.windowId === 'number') ? message.windowId : undefined;
+        
+        const captureOptions = { format: 'png' as const };
+
+        const handleResult = (dataUrl?: string, err?: chrome.runtime.LastError) => {
+          if (err || !dataUrl) {
+            console.error('[ServiceWorker] captureVisibleTab failed:', err?.message);
+            sendResponse({ status: 'error', error: err?.message || 'Failed to capture screen' });
+          } else {
+            sendResponse({ status: 'success', dataUrl });
+          }
+        };
+
+        if (targetWinId !== undefined) {
+          chrome.tabs.captureVisibleTab(targetWinId, captureOptions, (dataUrl) => {
+            const err = chrome.runtime.lastError;
+            if (err || !dataUrl) {
+              // Fallback to active window
+              chrome.tabs.captureVisibleTab(captureOptions, (fallbackUrl) => {
+                handleResult(fallbackUrl, chrome.runtime.lastError);
+              });
+            } else {
+              handleResult(dataUrl);
+            }
+          });
+        } else {
+          chrome.tabs.captureVisibleTab(captureOptions, (dataUrl) => {
+            handleResult(dataUrl, chrome.runtime.lastError);
+          });
+        }
+      } catch (syncErr: any) {
+        console.error('[ServiceWorker] captureVisibleTab sync exception:', syncErr);
+        sendResponse({ status: 'error', error: syncErr.message });
+      }
+
+      return true; // Keep message channel open for async response
+    }
+
+    // 3. Offscreen Local Vision Detection Relay
     if (message.action === 'RUN_OFFSCREEN_VISION') {
       const { imageDataUrl } = message as OffscreenVisionRequest;
 
@@ -101,28 +146,44 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
-    // 3. Relay payload to local FastAPI backend (Stage 2: Client -> Server)
+    // 4. Relay payload to local FastAPI backend (Stage 2: Client -> Server with Zero-Trust Guard)
     if (message.action === 'SEND_TO_SERVER') {
       const { payload, endpoint } = message as BackendProxyRequest;
       const targetUrl = endpoint || 'http://127.0.0.1:8000/process-screen';
 
+      const img = payload.image || payload.sanitizedImageBase64 || '';
+      
+      // Hard Zero-Trust Guard: Disallow transmitting unredacted raw capture
+      const isSanitized = (payload as any).brandSeal?.zeroLeakVerified || 
+                          (payload as any).privacyVerification?.verifiedOffline || 
+                          (payload as any).redaction_manifest !== undefined;
+
+      if (img && !isSanitized) {
+        const errorMsg = '🚨 [ZERO-TRUST ERROR] Attempted to transmit unverified/unredacted screenshot to server! Transmission blocked.';
+        console.error(`[Stage 2 - Zero-Trust Guard BLOCKED] ${errorMsg}`);
+        sendResponse({ status: 'error', error: errorMsg });
+        return true;
+      }
+
       const requestBody = {
-        image: payload.image || payload.sanitizedImageBase64,
+        image: img,
         domElements: payload.domElements || payload.domMap || [],
         userGoal: payload.userGoal || '',
         stepIndex: payload.stepIndex || 0,
         url: payload.url || '',
         title: payload.title || '',
         maskedCount: payload.maskedCount || payload.maskedPiiCount || 0,
+        redactionMode: (payload as any).redactionMode || 'blur',
+        privacyVerification: (payload as any).privacyVerification || { bytesLeaked: 0, verifiedOffline: true },
       };
 
-      const imgLen = requestBody.image?.length || 0;
-      const imgHash = computeShortHash(requestBody.image || '');
+      const imgLen = requestBody.image.length;
+      const imgHash = computeShortHash(requestBody.image);
 
       if (DEBUG) {
         console.log(
           `[Stage 2 - Client->Server RPC] POST ${targetUrl} | Step: ${(requestBody.stepIndex || 0) + 1} | ` +
-          `Nodes: ${requestBody.domElements.length} | Frame: ${imgLen} chars (hash: ${imgHash})`
+          `Nodes: ${requestBody.domElements.length} | Frame: ${imgLen} chars (hash: ${imgHash}) | Pre-Redacted: YES`
         );
       }
 

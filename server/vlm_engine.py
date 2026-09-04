@@ -31,17 +31,17 @@ except ImportError:
 
 from schemas import ScreenPayload, ActionResponse
 
-DEBUG = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
+DEBUG = os.environ.get("DEBUG", "true").lower() in ("true", "1", "yes")
 logger = logging.getLogger("ISRO-VLM-Engine")
 
 
 def repair_and_parse_json(raw_text: str) -> Optional[Dict[str, Any]]:
     """
-    Robust JSON parser and repair engine for VLM outputs:
+    Robust JSON parser and repair engine for local VLM outputs:
     1. Strips markdown fences (```json ... ```)
     2. Extracts balanced JSON object via regex
-    3. Fixes trailing commas and common formatting anomalies
-    4. Validates object structure
+    3. Safe AST literal evaluation for Python-dict syntax
+    4. Fixes trailing commas and common formatting anomalies
     """
     if not raw_text or not raw_text.strip():
         return None
@@ -65,9 +65,8 @@ def repair_and_parse_json(raw_text: str) -> Optional[Dict[str, Any]]:
     except json.JSONDecodeError:
         pass
 
-    # 4. Try safe AST literal evaluation (handles single quotes and Python dict formats safely)
+    # 4. Try safe AST literal evaluation (handles single quotes safely)
     try:
-        import ast
         evaluated = ast.literal_eval(cleaned)
         if isinstance(evaluated, dict):
             return evaluated
@@ -92,6 +91,7 @@ class LocalVLMEngine:
     - Strictly bound to local disk/HF cache (Zero Outbound Egress)
     - Hardware-aware loader (CUDA / MPS / CPU) with latency tracking
     - Strict JSON output repair & schema validation
+    - Loud final-prompt tracing for debugging
     - Deterministic fallback for guaranteed execution continuity
     """
 
@@ -192,6 +192,10 @@ class LocalVLMEngine:
                 "Next Action JSON:"
             )
 
+            # Priority 1: Permanent DEBUG logging of fully-assembled prompt
+            if DEBUG:
+                logger.debug(f"[DEBUG - Prompt] Assembled Ollama Prompt:\n{user_prompt}")
+
             req_body = {
                 "model": target_model,
                 "prompt": user_prompt,
@@ -224,7 +228,7 @@ class LocalVLMEngine:
     def _strict_semantic_grounding(self, payload: ScreenPayload, step_index: int) -> ActionResponse:
         """
         Deterministic, zero-latency in-memory semantic grounding engine.
-        Strictly executes assigned tasks in order and emits DONE immediately upon completion.
+        Strictly parses the user's live goal dynamically into atomic steps.
         """
         goal = payload.userGoal.strip()
         nodes = payload.domElements
@@ -239,7 +243,7 @@ class LocalVLMEngine:
                 explanation="No interactive elements detected; scrolling down 400px."
             )
 
-        # 1. Parse atomic instructions strictly from the user's prompt (with word boundaries \b)
+        # 1. Dynamically parse atomic instructions from user's goal with word boundaries (\b)
         clauses = re.split(r'\s*(?:\band\s+then\b|\bthen\b|\band\b|\.|\;|\&)\s*', goal, flags=re.IGNORECASE)
         tasks = []
 
@@ -310,6 +314,10 @@ class LocalVLMEngine:
         if not any(t["type"] == "CLICK" for t in tasks):
             if re.search(r'(?:submit|login|sign\s*in|log\s*in|finalize|apply)', goal, re.IGNORECASE):
                 tasks.append({"type": "CLICK", "hint": "submit", "value": None, "desc": "Click submit button"})
+
+        # Priority 1: Permanent DEBUG logging of parsed dynamic task structure
+        if DEBUG:
+            logger.debug(f"[DEBUG - Prompt] Parsed Dynamic Sub-Tasks ({len(tasks)}): {tasks}")
 
         # 2. Strict Stop Condition: Stop immediately with DONE when assigned tasks finish
         if tasks and step_index >= len(tasks):
@@ -483,6 +491,9 @@ class LocalVLMEngine:
                     f"Return ONLY valid JSON action command:\n"
                     f'{{"type": "TYPE" | "CLICK" | "SCROLL" | "DONE", "targetId": <int>, "text": "<str>", "explanation": "<reason>"}}'
                 )
+
+                if DEBUG:
+                    logger.debug(f"[DEBUG - Prompt] Assembled Qwen2-VL Prompt:\n{prompt_text}")
 
                 messages = [
                     {

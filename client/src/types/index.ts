@@ -5,15 +5,16 @@ export interface BoundingBox {
   height: number;
 }
 
+export type RedactionStyle = 'blur' | 'pixelate' | 'blackout';
+
 export type PIIType = 
   | 'password' 
   | 'credit_card' 
-  | 'ssn' 
-  | 'aadhar' 
-  | 'cvv' 
-  | 'pin' 
-  | 'email' 
+  | 'aadhaar' 
+  | 'pan' 
   | 'phone' 
+  | 'email' 
+  | 'cvv' 
   | 'face_avatar' 
   | 'personal_id'
   | 'custom_sensitive';
@@ -21,11 +22,15 @@ export type PIIType =
 export interface PIIElement {
   id: string;
   source: 'dom' | 'visual';
+  triggerType?: 'structural' | 'content';
+  content_present?: boolean;
   type: PIIType;
   label: string;
-  confidence?: number;
+  category: 'government_id' | 'financial' | 'credentials' | 'contact' | 'biometric' | 'general';
+  confidence: number;
   bbox: BoundingBox;
   selector?: string;
+  matchedPattern?: string;
 }
 
 export interface InteractiveNode {
@@ -58,15 +63,25 @@ export interface DOMScanResult {
   viewport: ViewportInfo;
 }
 
-export interface VisualDetection {
-  label: string;
-  score: number;
-  box: {
-    xmin: number;
-    ymin: number;
-    xmax: number;
-    ymax: number;
-  };
+export interface CategoryBreakdown {
+  faces: number;
+  passwords: number;
+  cards: number;
+  aadhaar: number;
+  pan: number;
+  contact: number;
+}
+
+export interface FramePrivacyReport {
+  timestamp: number;
+  totalMasked: number;
+  breakdown: CategoryBreakdown;
+  redactionMode: RedactionStyle;
+  processingLatencyMs: number;
+  bytesLeaked: 0;
+  zeroLeakVerified: boolean;
+  rawPiiRegions: BoundingBox[];
+  sanitizedPiiRegions: BoundingBox[];
 }
 
 export interface SanitizedPayload {
@@ -77,6 +92,8 @@ export interface SanitizedPayload {
   domMap: InteractiveNode[];
   maskedPIICount: number;
   piiDetails: PIIElement[];
+  redactionMode: RedactionStyle;
+  privacyReport: FramePrivacyReport;
   viewport: {
     width: number;
     height: number;
@@ -99,20 +116,28 @@ export interface AgentAction {
 
 export interface AgentResponse {
   action: AgentAction;
-  thought?: string;
-  status: 'SUCCESS' | 'CONTINUE' | 'FAILED' | 'COMPLETED';
+  confidence: number;
+  latency_ms: number;
+  redaction_acknowledged: boolean;
 }
 
-export interface ExtensionMessage {
-  type: 
-    | 'TRIGGER_CAPTURE_AND_SANITIZE'
-    | 'DOM_SCAN_REQUEST'
-    | 'DOM_SCAN_RESPONSE'
-    | 'OFFSCREEN_DETECT_VISUAL_PII'
-    | 'OFFSCREEN_DETECT_RESPONSE'
-    | 'EXECUTE_ACTION'
-    | 'ACTION_EXECUTION_RESULT'
-    | 'GET_STATUS'
-    | 'STATUS_RESPONSE';
-  payload?: any;
+export interface BrandSeal {
+  algorithm: 'HMAC-SHA256' | 'ISRO-ZERO-LEAK-v1';
+  timestamp: number;
+  signature: string;
+  sourceModule: 'getSanitizedScreenshot';
+  zeroLeakVerified: true;
 }
+
+export interface SanitizedScreenshotResult {
+  sanitizedDataUrl: string;
+  sanitizedImageBase64: string;
+  rawPreviewDataUrl?: string;
+  redaction_manifest: FramePrivacyReport;
+  piiElements: PIIElement[];
+  interactiveNodes: InteractiveNode[];
+  viewport: { width: number; height: number };
+  processingTimeMs: number;
+  brandSeal: BrandSeal;
+}
+
