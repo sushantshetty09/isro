@@ -5,6 +5,8 @@
  * Includes dedicated high-recall face / avatar / signature pattern detection.
  */
 
+import { webGpuEngine } from './webGpuEngine';
+
 export interface VisualPiiBox {
   x: number;
   y: number;
@@ -19,6 +21,9 @@ interface OffscreenMessage {
   imageDataUrl?: string;
   confidenceThreshold?: number;
   redactionMode?: 'adaptive' | 'blackout' | 'blur';
+  userGoal?: string;
+  currentStep?: any;
+  interactiveNodes?: any[];
 }
 
 /**
@@ -235,6 +240,29 @@ chrome.runtime.onMessage.addListener(
         })
         .catch(() => {
           sendResponse({ status: 'success', visualPiiBoxes: [], visionLatencyMs: 0 });
+        });
+
+      return true;
+    }
+
+    if (message.action === 'EVALUATE_LOCAL_TASK') {
+      const { userGoal, currentStep, interactiveNodes } = message;
+      webGpuEngine
+        .evaluateStep(
+          userGoal || '',
+          currentStep || { type: 'CLICK', hint: userGoal },
+          interactiveNodes || []
+        )
+        .then((res) => {
+          sendResponse({ status: 'success', ...res });
+        })
+        .catch((err) => {
+          console.warn('[Offscreen] WebGPU evaluation notice:', err);
+          sendResponse({
+            status: 'error',
+            canHandleLocally: false,
+            error: err?.message || 'WebGPU evaluation failed',
+          });
         });
 
       return true;

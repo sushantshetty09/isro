@@ -146,6 +146,29 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    // 3b. Offscreen WebGPU Local Task Evaluation Relay
+    if (message.action === 'EVALUATE_LOCAL_TASK') {
+      setupOffscreenDocument(OFFSCREEN_PATH)
+        .then(() => {
+          return chrome.runtime.sendMessage({
+            target: 'offscreen',
+            action: 'EVALUATE_LOCAL_TASK',
+            userGoal: message.userGoal,
+            currentStep: message.currentStep,
+            interactiveNodes: message.interactiveNodes,
+          });
+        })
+        .then((offscreenResponse) => {
+          sendResponse(offscreenResponse);
+        })
+        .catch((err) => {
+          console.debug('[Stage 1 - ServiceWorker] Offscreen WebGPU evaluation notice:', err);
+          sendResponse({ status: 'error', canHandleLocally: false, error: err?.message });
+        });
+
+      return true;
+    }
+
     // 4. Relay payload to local FastAPI backend (Stage 2: Client -> Server with Zero-Trust Guard)
     if (message.action === 'SEND_TO_SERVER') {
       const { payload, endpoint } = message as BackendProxyRequest;
