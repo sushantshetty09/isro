@@ -123,6 +123,17 @@ class LocalVLMEngine:
 
         t_start = time.perf_counter()
         try:
+            hf_cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+            formatted_repo_dir = f"models--{self.model_id.replace('/', '--')}"
+            full_repo_path = os.path.join(hf_cache_dir, formatted_repo_dir)
+            is_local = os.path.isdir(self.model_id) or os.path.isdir(full_repo_path)
+
+            if not is_local and not os.environ.get("FORCE_HF_LOAD"):
+                self.load_time_sec = 0.0
+                logger.info("Local Qwen weights not present in local cache. Operating in high-speed local decision planner mode.")
+                self.is_loaded = False
+                return
+
             from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
             torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
 

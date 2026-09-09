@@ -10,7 +10,7 @@ export interface RedactionResult {
 }
 
 /**
- * Apply fast pixelate effect to a canvas region
+ * Apply crisp pixelate effect to a canvas region
  */
 function applyPixelate(
   ctx: CanvasRenderingContext2D,
@@ -30,10 +30,10 @@ function applyPixelate(
   tempCanvas.width = smallW;
   tempCanvas.height = smallH;
 
-  // Draw scaled down
+  // Downsample
   tempCtx.drawImage(ctx.canvas, x, y, w, h, 0, 0, smallW, smallH);
 
-  // Draw back scaled up with pixelated smoothing disabled
+  // Upsample with crisp nearest-neighbor smoothing
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(tempCanvas, 0, 0, smallW, smallH, x, y, w, h);
@@ -41,7 +41,7 @@ function applyPixelate(
 }
 
 /**
- * Apply smooth multi-pass blur effect to a canvas region
+ * Apply smooth authentic multi-pass blur effect to a canvas region
  */
 function applyBlur(
   ctx: CanvasRenderingContext2D,
@@ -49,9 +49,10 @@ function applyBlur(
   y: number,
   w: number,
   h: number,
-  blurRadius: number = 28
+  blurRadius: number = 32
 ) {
   if (w <= 0 || h <= 0) return;
+
   const tempCanvas = document.createElement('canvas');
   const tempCtx = tempCanvas.getContext('2d');
   if (!tempCtx) return;
@@ -59,7 +60,7 @@ function applyBlur(
   tempCanvas.width = w;
   tempCanvas.height = h;
 
-  // Copy original slice
+  // Extract region to isolate blur
   tempCtx.drawImage(ctx.canvas, x, y, w, h, 0, 0, w, h);
 
   ctx.save();
@@ -67,14 +68,17 @@ function applyBlur(
   ctx.rect(x, y, w, h);
   ctx.clip();
 
-  // Multi-pass native canvas blur
+  // Multi-pass native canvas blur for true Gaussian-like look
   ctx.filter = `blur(${blurRadius}px)`;
   ctx.drawImage(tempCanvas, x, y, w, h);
   ctx.drawImage(tempCanvas, x, y, w, h);
   ctx.drawImage(tempCanvas, x, y, w, h);
 
-  // Privacy overlay tint so no facial details leak through
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+  // Reset filter
+  ctx.filter = 'none';
+
+  // Subtle frosted glass privacy tint
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
   ctx.fillRect(x, y, w, h);
   ctx.restore();
 }
@@ -99,13 +103,23 @@ function applyBlackout(
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, w, h);
 
-  if (w >= 50 && h >= 16) {
+  if (w >= 40 && h >= 16) {
     ctx.fillStyle = '#ef4444';
     ctx.font = 'bold 11px monospace';
     ctx.textBaseline = 'middle';
     ctx.fillText(`[${label.toUpperCase()}]`, x + 6, y + Math.min(14, h / 2));
   }
   ctx.restore();
+}
+
+interface TargetRedactionRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  type: string;
+  label: string;
+  source: 'dom' | 'visual';
 }
 
 /**
@@ -121,9 +135,9 @@ export async function redactFrame(
 ): Promise<RedactionResult> {
   const startTime = performance.now();
 
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
       const canvas = document.createElement('canvas');
       const width = img.naturalWidth || 1280;
       const height = img.naturalHeight || 720;
@@ -145,47 +159,100 @@ export async function redactFrame(
       // 1. Draw raw frame as base
       ctx.drawImage(img, 0, 0, width, height);
 
-      // 2. Compute coordinate scale factors
+      // 2. Compute coordinate scale factors between DOM Viewport & Canvas Pixels
       const vpW = (viewport && viewport.width > 0) ? viewport.width : width;
       const vpH = (viewport && viewport.height > 0) ? viewport.height : height;
       const scaleX = width / vpW;
       const scaleY = height / vpH;
 
-      // 3. Detect visual faces directly on the canvas
-      const visualFaces = detectVisualFaces(canvas);
-      const allPii: PIIElement[] = [...piiElements];
+      // 3. Unified target redaction regions list
+      const targetRegions: TargetRedactionRegion[] = [];
+      const allPiiElementsOut: PIIElement[] = [];
 
-      // Merge visual face boxes if not already overlapping existing DOM box
-      for (const face of visualFaces) {
-        const alreadyCovered = piiElements.some(p => {
-          const px = p.bbox.x * scaleX;
-          const py = p.bbox.y * scaleY;
-          const pw = p.bbox.width * scaleX;
-          const ph = p.bbox.height * scaleY;
-          return Math.abs(px - face.x) < 30 && Math.abs(py - face.y) < 30;
+      // 3a. Process input PII elements with proper coordinate handling
+      for (const pii of piiElements) {
+        let rx: number, ry: number, rw: number, rh: number;
+
+        if (pii.source === 'visual') {
+          // Visual bboxes are ALREADY in canvas pixel space
+          rx = pii.bbox.x;
+          ry = pii.bbox.y;
+          rw = pii.bbox.width;
+          rh = pii.bbox.height;
+        } else {
+          // DOM bboxes are in viewport space; scale up to canvas dimensions
+          rx = Math.round(pii.bbox.x * scaleX);
+          ry = Math.round(pii.bbox.y * scaleY);
+          rw = Math.round(pii.bbox.width * scaleX);
+          rh = Math.round(pii.bbox.height * scaleY);
+        }
+
+        // Clamp to canvas boundaries
+        const cx = Math.max(0, Math.min(width - 4, rx));
+        const cy = Math.max(0, Math.min(height - 4, ry));
+        const cw = Math.max(4, Math.min(width - cx, rw));
+        const ch = Math.max(4, Math.min(height - cy, rh));
+
+        targetRegions.push({
+          x: cx,
+          y: cy,
+          w: cw,
+          h: ch,
+          type: pii.type,
+          label: pii.label || pii.type,
+          source: pii.source || 'dom',
         });
 
-        if (!alreadyCovered) {
-          allPii.push({
-            id: `visual-face-${allPii.length}`,
+        allPiiElementsOut.push(pii);
+      }
+
+      // 3b. Detect visual faces directly on the canvas image
+      const detectedFaces = await detectVisualFaces(canvas);
+      for (const face of detectedFaces) {
+        // Check if this face is already covered by an existing region
+        const isOverlap = targetRegions.some(t => {
+          const overlapX = Math.max(0, Math.min(t.x + t.w, face.x + face.width) - Math.max(t.x, face.x));
+          const overlapY = Math.max(0, Math.min(t.y + t.h, face.y + face.height) - Math.max(t.y, face.y));
+          const overlapArea = overlapX * overlapY;
+          return overlapArea > (face.width * face.height * 0.25);
+        });
+
+        if (!isOverlap) {
+          const fx = Math.max(0, Math.min(width - 4, face.x));
+          const fy = Math.max(0, Math.min(height - 4, face.y));
+          const fw = Math.max(4, Math.min(width - fx, face.width));
+          const fh = Math.max(4, Math.min(height - fy, face.height));
+
+          targetRegions.push({
+            x: fx,
+            y: fy,
+            w: fw,
+            h: fh,
+            type: 'face_avatar',
+            label: 'Detected Face / Profile Avatar',
+            source: 'visual',
+          });
+
+          allPiiElementsOut.push({
+            id: `visual-face-${allPiiElementsOut.length}`,
             source: 'visual',
             type: 'face_avatar',
             label: 'Detected Face / Profile Avatar',
             category: 'biometric',
             confidence: face.confidence,
             bbox: {
-              x: Math.round(face.x / scaleX),
-              y: Math.round(face.y / scaleY),
-              width: Math.round(face.width / scaleX),
-              height: Math.round(face.height / scaleY),
+              x: fx,
+              y: fy,
+              width: fw,
+              height: fh,
             },
           });
         }
       }
 
-      console.log(`[Redactor] Compositing ${allPii.length} PII boxes (including ${visualFaces.length} visual faces) on canvas (${width}x${height}), viewport (${vpW}x${vpH}), scale: (${scaleX.toFixed(2)}, ${scaleY.toFixed(2)}), style: ${style}`);
+      console.log(`[Redactor] Compositing ${targetRegions.length} sensitive regions on canvas (${width}x${height}), viewport (${vpW}x${vpH}), scale: (${scaleX.toFixed(2)}, ${scaleY.toFixed(2)}), style: ${style}`);
 
-      // 4. Tally category breakdowns
+      // 4. Category breakdown tallies
       const breakdown: CategoryBreakdown = {
         faces: 0,
         passwords: 0,
@@ -197,45 +264,35 @@ export async function redactFrame(
 
       const rawPiiRegions: BoundingBox[] = [];
 
-      // 5. Redact each detected PII & Biometric region
-      for (const pii of allPii) {
-        const { bbox, type } = pii;
+      // 5. Redact each detected region according to selected style
+      for (const reg of targetRegions) {
+        rawPiiRegions.push({ x: reg.x, y: reg.y, width: reg.w, height: reg.h });
 
-        // Scale bounding box to canvas dimensions
-        const renderX = Math.max(0, Math.round(bbox.x * scaleX));
-        const renderY = Math.max(0, Math.round(bbox.y * scaleY));
-        const renderW = Math.min(width - renderX, Math.round(bbox.width * scaleX));
-        const renderH = Math.min(height - renderY, Math.round(bbox.height * scaleY));
+        if (reg.type === 'face_avatar' || reg.type === 'face') breakdown.faces++;
+        else if (reg.type === 'password') breakdown.passwords++;
+        else if (reg.type === 'credit_card' || reg.type === 'cvv') breakdown.cards++;
+        else if (reg.type === 'aadhaar') breakdown.aadhaar++;
+        else if (reg.type === 'pan') breakdown.pan++;
+        else if (reg.type === 'phone' || reg.type === 'email') breakdown.contact++;
 
-        rawPiiRegions.push({ x: renderX, y: renderY, width: renderW, height: renderH });
-
-        // Update category tallies
-        if (type === 'face_avatar') breakdown.faces++;
-        else if (type === 'password') breakdown.passwords++;
-        else if (type === 'credit_card' || type === 'cvv') breakdown.cards++;
-        else if (type === 'aadhaar') breakdown.aadhaar++;
-        else if (type === 'pan') breakdown.pan++;
-        else if (type === 'phone' || type === 'email') breakdown.contact++;
-
-        // Render chosen style
         if (style === 'blur') {
-          applyBlur(ctx, renderX, renderY, renderW, renderH, 20);
+          applyBlur(ctx, reg.x, reg.y, reg.w, reg.h, 34);
         } else if (style === 'pixelate') {
-          applyPixelate(ctx, renderX, renderY, renderW, renderH, 12);
+          applyPixelate(ctx, reg.x, reg.y, reg.w, reg.h, 14);
         } else {
-          const displayTag = pii.label ? pii.label.replace(' (Empty)', '') : type.replace('_', ' ');
-          applyBlackout(ctx, renderX, renderY, renderW, renderH, displayTag);
+          const displayTag = reg.label ? reg.label.replace(' (Empty)', '') : reg.type.replace('_', ' ');
+          applyBlackout(ctx, reg.x, reg.y, reg.w, reg.h, displayTag);
         }
 
-        // Draw protective border badge
+        // Draw clean protective boundary indicator
         ctx.save();
-        ctx.strokeStyle = style === 'blackout' ? '#ef4444' : '#38bdf8';
+        ctx.strokeStyle = style === 'blackout' ? '#ef4444' : style === 'pixelate' ? '#fbbf24' : '#38bdf8';
         ctx.lineWidth = 2;
-        ctx.strokeRect(renderX, renderY, renderW, renderH);
+        ctx.strokeRect(reg.x, reg.y, reg.w, reg.h);
         ctx.restore();
       }
 
-      // 5. Optionally draw Set-of-Marks tags on safe interactive elements
+      // 6. Draw Set-of-Marks tags on safe interactive elements
       if (showSoMTags && interactiveNodes.length > 0) {
         for (const node of interactiveNodes.slice(0, 50)) {
           const { bbox, id } = node;
@@ -260,11 +317,11 @@ export async function redactFrame(
       }
 
       const processingTimeMs = Math.round(performance.now() - startTime);
-      const sanitizedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      const sanitizedDataUrl = canvas.toDataURL('image/jpeg', 0.90);
 
       const report: FramePrivacyReport = {
         timestamp: Date.now(),
-        totalMasked: allPii.length,
+        totalMasked: targetRegions.length,
         breakdown,
         redactionMode: style,
         processingLatencyMs: processingTimeMs,
@@ -276,10 +333,10 @@ export async function redactFrame(
 
       resolve({
         sanitizedDataUrl,
-        rawPiiCount: allPii.length,
+        rawPiiCount: targetRegions.length,
         report,
         processingTimeMs,
-        allPiiElements: allPii,
+        allPiiElements: allPiiElementsOut,
       });
     };
 

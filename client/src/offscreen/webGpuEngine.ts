@@ -183,21 +183,21 @@ class LocalWebGpuPerceptionEngine {
       size: paramsData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(paramsBuffer, 0, paramsData);
+    device.queue.writeBuffer(paramsBuffer, 0, paramsData as unknown as BufferSource);
 
     // 2. Query vector buffer
     const queryBuffer = device.createBuffer({
       size: queryVec.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(queryBuffer, 0, queryVec);
+    device.queue.writeBuffer(queryBuffer, 0, queryVec as unknown as BufferSource);
 
     // 3. Candidate vectors buffer
     const candidatesBuffer = device.createBuffer({
       size: candidateVecs.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(candidatesBuffer, 0, candidateVecs);
+    device.queue.writeBuffer(candidatesBuffer, 0, candidateVecs as unknown as BufferSource);
 
     // 4. Output scores buffer
     const outputBufferSize = numCandidates * Float32Array.BYTES_PER_ELEMENT;
